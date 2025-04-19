@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LoopDash</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    html, body {
+      margin: 0;
+      background: black;
+      overflow: hidden;
+      touch-action: none;
+      font-family: sans-serif;
+    }
+    canvas {
+      background: #111;
+      display: block;
+    }
+    #mobileControls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      z-index: 10;
+      gap: 10px;
+    }
+    .btn {
+      padding: 10px 20px;
+      background: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    #scoreDisplay {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-size: 20px;
+    }
+    #gameOverScreen {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      font-size: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      display: none;
+    }
+    #gameOverScreen button {
+      margin-top: 20px;
+      font-size: 20px;
+      padding: 10px 20px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="scoreDisplay">Score: 0</div>
+<div id="mobileControls">
+  <button class="btn" id="jumpBtn">Jump</button>
+  <button class="btn" id="rewindBtn">Rewind</button>
+</div>
+
+<div id="gameOverScreen">
+  <div>Game Over</div>
+  <button onclick="location.reload()">Restart</button>
+</div>
+
+<script>
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  const mobileControls = document.getElementById("mobileControls");
+  if (isMobile) mobileControls.style.display = "flex";
+
+  const gravity = 0.4;
+  const floorY = canvas.height - 100;
+  let playerSpeed = 3;
+  let score = 0;
+  let gameOver = false;
+
+  const player = {
+    x: 100,
+    y: floorY,
+    width: 30,
+    height: 30,
+    vy: 0,
+    onGround: true,
+    history: [],
+    ghostHistory: [],
+    ghostActive: false,
+    color: "white",
+  };
+
+  const obstacles = [];
+
+  const sounds = {
+    jump: new Audio('https://www.soundjay.com/button/beep-07.wav'),
+    rewind: new Audio('https://www.soundjay.com/button/beep-09.wav'),
+    gameOver: new Audio('https://www.soundjay.com/button/beep-03.wav'),
+  };
+
+  const themes = [
+    { name: "Space", bgColor: "#000", color: "#fff", layers: ["#000", "#111", "#222"] },
+    { name: "City", bgColor: "#222", color: "#f44", layers: ["#111", "#222", "#333"] },
+    { name: "Forest", bgColor: "#222", color: "#0f0", layers: ["#0b0", "#2b2", "#3b3"] },
+    { name: "Ocean", bgColor: "#444", color: "#00f", layers: ["#00a", "#1a1", "#2b2"] },
+    { name: "Cyber", bgColor: "#111", color: "#0ff", layers: ["#111", "#222", "#333"] },
+  ];
+
+  const theme = themes[Math.floor(Math.random() * themes.length)];
+
+  function playSound(sound) {
+    sound.play();
+  }
+
+  function spawnObstacle() {
+    const height = 40 + Math.random() * 30;
+    obstacles.push({
+      x: canvas.width,
+      y: floorY - height,
+      width: 30,
+      height,
+    });
+  }
+
+  function jump() {
+    if (player.onGround) {
+      player.vy = -10;
+      player.onGround = false;
+      playSound(sounds.jump);
+    }
+  }
+
+  function rewind() {
+    if (player.history.length > 0) {
+      player.ghostHistory = [...player.history];
+      player.ghostActive = true;
+      const rewindState = player.history[0];
+      Object.assign(player, rewindState);
+      player.color = "cyan";
+      player.history = [];
+      playSound(sounds.rewind);
+    }
+  }
+
+  if (!isMobile) {
+    document.addEventListener("keydown", (e) => {
+      if (e.code === "Space") jump();
+      if (e.code === "KeyR") rewind();
+    });
+  } else {
+    document.getElementById("jumpBtn").addEventListener("touchstart", jump);
+    document.getElementById("rewindBtn").addEventListener("touchstart", rewind);
+  }
+
+  function updatePlayer() {
+    player.vy += gravity;
+    player.y += player.vy;
+    player.x += playerSpeed;
+
+    if (player.y + player.height >= floorY) {
+      player.y = floorY - player.height;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    player.history.unshift({ ...player });
+    if (player.history.length > 120) player.history.pop();
+  }
+
+  function updateGhost() {
+    if (player.ghostActive && player.ghostHistory.length > 0) {
+      const ghost = player.ghostHistory.pop();
+      ctx.fillStyle = "rgba(0,255,255,0.3)";
+      ctx.fillRect(ghost.x, ghost.y, ghost.width, ghost.height);
+
+      // Collision with ghost
+      if (checkCollision(player, ghost)) {
+        endGame();
+      }
+    } else {
+      player.ghostActive = false;
+    }
+  }
+
+  function drawPlayer() {
+    ctx.fillStyle = player.color;
+    ctx.fillRect(player.x, player.y, player.width, player.height);
+  }
+
+  function drawFloor() {
+    ctx.fillStyle = theme.bgColor;
+    ctx.fillRect(0, floorY, canvas.width, 100);
+  }
+
+  function drawObstacles() {
+    ctx.fillStyle = theme.color;
+    obstacles.forEach((ob) => {
+      ob.x -= playerSpeed;
+      ctx.fillRect(ob.x, ob.y, ob.width, ob.height);
+
+      // Collision check
+      if (checkCollision(player, ob)) {
+        endGame();
+      }
+    });
+
+    // Remove off-screen obstacles
+    while (obstacles.length > 0 && obstacles[0].x + obstacles[0].width < 0) {
+      obstacles.shift();
+    }
+  }
+
+  function checkCollision(a, b) {
+    return (
+      a.x < b.x + b.width &&
+      a.x + a.width > b.x &&
+      a.y < b.y + b.height &&
+      a.y + a.height > b.y
+    );
+  }
+
+  function endGame() {
+    gameOver = true;
+    playSound(sounds.gameOver);
+    document.getElementById("gameOverScreen").style.display = "flex";
+    saveScore();
+  }
+
+  function saveScore() {
+    let scores = JSON.parse(localStorage.getItem("loopdashScores")) || [];
+    scores.push(score);
+    scores.sort((a, b) => b - a); // Sort in descending order
+    if (scores.length > 5) scores = scores.slice(0, 5); // Keep top 5 scores
+    localStorage.setItem("loopdashScores", JSON.stringify(scores));
+    displayScores(scores);
+  }
+
+  function displayScores(scores) {
+    const scoreList = scores.map((score) => `<li>${score}</li>`).join("");
+    document.getElementById("gameOverScreen").innerHTML = `
+      <div>Game Over</div>
+      <div>Top Scores:</div>
+      <ul>${scoreList}</ul>
+      <button onclick="location.reload()">Restart</button>
+    `;
+  }
+
+  function updateScore() {
+    score += 1;
+    document.getElementById("scoreDisplay").textContent = "Score: " + score;
+    if (score % 300 === 0) playerSpeed += 0.5; // Increase speed over time
+  }
+
+  let spawnTimer = 0;
+
+  function gameLoop() {
+    if (gameOver) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    updatePlayer();
+    updateGhost();
+    drawFloor();
+    drawObstacles();
+    drawPlayer();
+    updateScore();
+
+    spawnTimer++;
+    if (spawnTimer > 90) {
+      spawnObstacle();
+      spawnTimer = 0;
+    }
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  gameLoop();
+</script>
+
+</body>
+</html>
